@@ -1,4 +1,5 @@
-Global Context Trading
+Global Context Trading 
+===
 Local Context Trading
 
 Context Defiition
