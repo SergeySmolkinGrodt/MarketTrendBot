@@ -1,9 +1,9 @@
 using System;
-using System.Collections.Generic; // Added for IEnumerable
-using System.Linq; // Added for LINQ operations
+using System.Collections.Generic;
+using System.Linq; // Still needed for Positions.Any()
 using cAlgo.API;
 using cAlgo.API.Collections;
-using cAlgo.API.Indicators;
+// using cAlgo.API.Indicators; // No longer needed directly here if IndicatorsHelper is removed
 using cAlgo.API.Internals;
 
 namespace cAlgo.Robots
@@ -46,196 +46,83 @@ namespace cAlgo.Robots
         public double Close { get; set; }
         public double Volume { get; set; }
 
-        public double TypicalPrice => (High + Low + Close) / 3;
-        public double TrueRange(PriceBar previousBar)
-        {
-            if (previousBar == null) return High - Low;
-            return Math.Max(High - Low, Math.Max(Math.Abs(High - previousBar.Close), Math.Abs(Low - previousBar.Close)));
-        }
+        // These might be useful for other features later, but not for current context logic
+        // public double TypicalPrice => (High + Low + Close) / 3;
+        // public double TrueRange(PriceBar previousBar)
+        // {
+        //     if (previousBar == null) return High - Low;
+        //     return Math.Max(High - Low, Math.Max(Math.Abs(High - previousBar.Close), Math.Abs(Low - previousBar.Close)));
+        // }
     }
 
     /// <summary>
-    /// Contains helper methods for calculating technical indicators.
-    /// </summary>
-    public static class IndicatorsHelper
-    {
-        /// <summary>
-        /// Calculates Exponential Moving Average (EMA).
-        /// </summary>
-        public static List<double> CalculateEMA(IList<double> prices, int period)
-        {
-            if (prices == null || prices.Count < period)
-                return new List<double>();
-
-            var emaValues = new List<double>(prices.Count);
-            double multiplier = 2.0 / (period + 1);
-            double sma = prices.Take(period).Average(); // Initial SMA
-            emaValues.AddRange(Enumerable.Repeat(0.0, period - 1)); // Fill initial with 0 or another placeholder
-            emaValues.Add(sma);
-
-            for (int i = period; i < prices.Count; i++)
-            {
-                double ema = (prices[i] - emaValues.Last(v => v != 0.0)) * multiplier + emaValues.Last(v => v != 0.0);
-                emaValues.Add(ema);
-            }
-            return emaValues;
-        }
-
-        /// <summary>
-        /// Calculates Average True Range (ATR).
-        /// </summary>
-        public static List<double> CalculateATR(IList<PriceBar> bars, int period)
-        {
-            if (bars == null || bars.Count < period)
-                return new List<double>();
-
-            var atrValues = new List<double>(bars.Count);
-            var trValues = new List<double>(bars.Count);
-
-            trValues.Add(bars[0].High - bars[0].Low); // TR for the first bar
-            for (int i = 1; i < bars.Count; i++)
-            {
-                trValues.Add(bars[i].TrueRange(bars[i-1]));
-            }
-
-            // Calculate initial ATR (SMA of TRs)
-            atrValues.AddRange(Enumerable.Repeat(0.0, period -1)); // Fill initial with 0 or another placeholder
-            double initialAtr = trValues.Take(period).Average();
-            atrValues.Add(initialAtr);
-
-
-            // Wilder's smoothing for subsequent ATR values
-            for (int i = period; i < trValues.Count; i++)
-            {
-                double atr = (atrValues.Last(v => v != 0.0) * (period - 1) + trValues[i]) / period;
-                atrValues.Add(atr);
-            }
-            return atrValues;
-        }
-    }
-
-
-    /// <summary>
-    /// Market context analyzer.
-    /// Will use channels to determine the context in the future.
+    /// Market context analyzer based on N-period price change.
     /// </summary>
     public class MarketContextAnalyzer
     {
-        private readonly int _keltnerPeriod;
-        private readonly double _keltnerMultiplier;
-        private readonly int _atrPeriod;
+        private readonly int _lookbackPeriod;
+        private readonly double _thresholdInPips;
 
-
-        public MarketContextAnalyzer(int keltnerPeriod = 20, double keltnerMultiplier = 2.0, int atrPeriod = 10)
+        public MarketContextAnalyzer(int lookbackPeriod, double thresholdInPips)
         {
-            _keltnerPeriod = keltnerPeriod;
-            _keltnerMultiplier = keltnerMultiplier;
-            _atrPeriod = atrPeriod;
+            _lookbackPeriod = lookbackPeriod > 0 ? lookbackPeriod : 1; // Ensure lookback is at least 1
+            _thresholdInPips = thresholdInPips;
         }
 
         /// <summary>
-        /// Defines the current market context based on historical data.
+        /// Defines the current market context based on N-period price change.
         /// </summary>
         /// <param name="priceBars">List of historical price data (candles/bars).</param>
+        /// <param name="pipSize">The pip size for the current symbol.</param>
         /// <returns>Current MarketContext.</returns>
-        public MarketContext GetContext(IList<PriceBar> priceBars)
+        public MarketContext GetContext(IList<PriceBar> priceBars, double pipSize)
         {
-            if (priceBars == null || priceBars.Count < Math.Max(_keltnerPeriod, _atrPeriod))
+            if (priceBars == null || priceBars.Count < _lookbackPeriod + 1)
             {
-                Console.WriteLine("Not enough data to determine context.");
+                //Console.WriteLine("Not enough data to determine context.");
                 return MarketContext.Undefined;
             }
-
-            var typicalPrices = priceBars.Select(p => p.TypicalPrice).ToList();
-            var emaValues = IndicatorsHelper.CalculateEMA(typicalPrices, _keltnerPeriod);
-            var atrValues = IndicatorsHelper.CalculateATR(priceBars, _atrPeriod);
-
-            if (emaValues.Count == 0 || atrValues.Count == 0)
+            if (pipSize <= 0)
             {
-                 Console.WriteLine("Failed to calculate indicators for context analysis.");
-                return MarketContext.Undefined;
+                //Console.WriteLine("Pip size is invalid, cannot determine context.");
+                return MarketContext.Undefined; 
             }
 
-            // Get the latest values
-            double currentEma = emaValues.Last();
-            double currentAtr = atrValues.Last();
             PriceBar currentBar = priceBars.Last();
+            PriceBar lookbackBar = priceBars[priceBars.Count - 1 - _lookbackPeriod];
 
-            double upperKeltner = currentEma + (_keltnerMultiplier * currentAtr);
-            double lowerKeltner = currentEma - (_keltnerMultiplier * currentAtr);
+            double priceChange = currentBar.Close - lookbackBar.Close;
+            double priceChangeInPips = priceChange / pipSize;
 
-            // Basic Keltner Channel Logic:
-            // Trend determination can be more sophisticated, e.g., by looking at the slope of the EMA
-            // or consecutive closes above/below bands.
-            
-            // For now, a simplified approach:
-            // If close is above upper band -> Trending Up
-            // If close is below lower band -> Trending Down
-            // Otherwise -> Ranging
-
-            // We also need to consider the slope of the EMA for trend direction.
-            // Let's get the EMA from a few bars ago to check the slope
-            if (emaValues.Count < 3) // Need at least 3 EMA values to check slope simply
-            {
-                return MarketContext.Ranging; // Not enough data for slope
-            }
-
-            double previousEma2 = emaValues[emaValues.Count - 3]; // EMA two bars before current
-            double previousEma1 = emaValues[emaValues.Count - 2]; // EMA one bar before current
-
-            bool emaRising = currentEma > previousEma1 && previousEma1 > previousEma2;
-            bool emaFalling = currentEma < previousEma1 && previousEma1 < previousEma2;
-
-
-            if (currentBar.Close > upperKeltner && emaRising)
+            if (priceChangeInPips > _thresholdInPips)
             {
                 return MarketContext.TrendingUp;
             }
-            else if (currentBar.Close < lowerKeltner && emaFalling)
+            else if (priceChangeInPips < -_thresholdInPips)
             {
                 return MarketContext.TrendingDown;
             }
             else
             {
-                // More robust ranging detection could involve checking if price is within bands
-                // AND the bands are relatively flat or contracting (low ATR or ATR not expanding significantly)
-                // Or if EMA slope is neutral
-                bool isPriceInsideBands = currentBar.Close < upperKeltner && currentBar.Close > lowerKeltner;
-                bool emaFlat = !emaRising && !emaFalling; // Simplified flatness check
-
-                if (isPriceInsideBands && emaFlat)
-                {
-                    return MarketContext.Ranging;
-                }
-                // If price is inside bands but EMA is still clearly rising/falling,
-                // it might be a pullback within a trend rather than pure ranging.
-                // For now, let's be conservative and classify as Undefined if not clearly trending or ranging.
-                 if (isPriceInsideBands && emaRising) return MarketContext.TrendingUp; // Or a weaker form of uptrend/pullback
-                 if (isPriceInsideBands && emaFalling) return MarketContext.TrendingDown; // Or a weaker form of downtrend/pullback
-
-
-                return MarketContext.Ranging; // Default to ranging if inside bands and not clearly trending.
+                return MarketContext.Ranging;
             }
         }
     }
 
 
-    [Robot(AccessRights = AccessRights.None, AddIndicators = true)]
+    [Robot(AccessRights = AccessRights.None, AddIndicators = true)] // AddIndicators might not be strictly needed now
     public class context : Robot
     {
         [Parameter("Message", DefaultValue = "Hello world!")]
         public string Message { get; set; }
 
-        [Parameter("Keltner Period", DefaultValue = 20, MinValue = 2, Group = "Context Analysis")]
-        public int KeltnerPeriod { get; set; }
+        [Parameter("Context Lookback Period", DefaultValue = 10, MinValue = 1, Group = "Context Analysis")]
+        public int ContextLookbackPeriod { get; set; }
 
-        [Parameter("Keltner Multiplier", DefaultValue = 2.0, MinValue = 0.1, Group = "Context Analysis")]
-        public double KeltnerMultiplier { get; set; }
+        [Parameter("Context Threshold (Pips)", DefaultValue = 20, MinValue = 1, Group = "Context Analysis")]
+        public double ContextThresholdInPips { get; set; }
 
-        [Parameter("ATR Period", DefaultValue = 10, MinValue = 1, Group = "Context Analysis")]
-        public int AtrPeriod { get; set; }
-
-        [Parameter("Risk % Per Trade", DefaultValue = 1.0, MinValue = 0.1, MaxValue = 5.0, Step = 0.1, Group = "Trading")]
+        [Parameter("Risk % Per Trade", DefaultValue = 1.0, MinValue = 0.1, MaxValue = 1.0, Step = 0.1, Group = "Trading")]
         public double RiskPercentage { get; set; }
 
         [Parameter("Stop Loss (Pips)", DefaultValue = 20, MinValue = 1, Group = "Trading")]
@@ -244,13 +131,13 @@ namespace cAlgo.Robots
         [Parameter("Take Profit (Pips)", DefaultValue = 40, MinValue = 1, Group = "Trading")]
         public int TakeProfitInPips { get; set; }
 
-        [Parameter("Trade Label", DefaultValue = "MarketTrendBot_v1", Group = "Trading")]
+        [Parameter("Trade Label", DefaultValue = "MarketTrendBot_v2", Group = "Trading")]
         public string TradeLabel { get; set; }
 
 
         private MarketContextAnalyzer _analyzer;
         private List<PriceBar> _historicalBars;
-        private const int _maxBars = 200; // Store a maximum of 200 bars for analysis
+        private const int _maxBars = 200; // Store a maximum of 200 bars for analysis, can be adjusted
 
         private DateTime _lastTradeDate = DateTime.MinValue;
         private readonly TimeSpan _tradeStartTime = new TimeSpan(9, 0, 0); // 09:00
@@ -261,7 +148,7 @@ namespace cAlgo.Robots
         protected override void OnStart()
         {
             Print(Message);
-            _analyzer = new MarketContextAnalyzer(KeltnerPeriod, KeltnerMultiplier, AtrPeriod);
+            _analyzer = new MarketContextAnalyzer(ContextLookbackPeriod, ContextThresholdInPips);
             _historicalBars = new List<PriceBar>();
 
             var history = MarketData.GetBars(TimeFrame, Symbol.Name);
@@ -277,16 +164,18 @@ namespace cAlgo.Robots
                     Volume = bar.TickVolume
                 };
                 _historicalBars.Add(priceBar);
-                if (_historicalBars.Count > _maxBars)
+                if (_historicalBars.Count > _maxBars) // Ensure _maxBars is sufficient for longest lookback
                 {
                     _historicalBars.RemoveAt(0);
                 }
             }
             Print($"Loaded {history.Count} historical bars. Using last {_historicalBars.Count} for analysis.");
+            Print($"Ensure _maxBars ({_maxBars}) is greater than ContextLookbackPeriod ({ContextLookbackPeriod}).");
 
-            if (_historicalBars.Count > Math.Max(KeltnerPeriod, AtrPeriod))
+
+            if (_historicalBars.Count > ContextLookbackPeriod) // Need LookbackPeriod + 1 bars for first calculation
             {
-                MarketContext initialContext = _analyzer.GetContext(_historicalBars);
+                MarketContext initialContext = _analyzer.GetContext(_historicalBars, Symbol.PipSize);
                 Print($"Initial Market Context: {initialContext}");
             }
             else
@@ -317,32 +206,29 @@ namespace cAlgo.Robots
                 }
             }
 
-            if (_historicalBars.Count < Math.Max(KeltnerPeriod, AtrPeriod))
+            if (_historicalBars.Count <= ContextLookbackPeriod) // Check if enough data for lookback (needs N+1 bars)
             {
-                Print($"Not enough data to determine context or trade. Bars collected: {_historicalBars.Count}");
+                Print($"Not enough data to determine context. Bars collected: {_historicalBars.Count}, Need: {ContextLookbackPeriod + 1}");
                 return;
             }
 
-            MarketContext currentContext = _analyzer.GetContext(_historicalBars);
-            Print($"Server Time (UTC): {Server.Time:HH:mm:ss}, Bar Time: {newBar.OpenTime:HH:mm:ss}, Context: {currentContext}");
+            MarketContext currentContext = _analyzer.GetContext(_historicalBars, Symbol.PipSize);
+            Print($"Server Time (UTC): {Server.Time:HH:mm:ss}, Bar Time: {newBar.OpenTime:HH:mm:ss}, Context: {currentContext}, PipChangeThreshold: {ContextThresholdInPips} over {ContextLookbackPeriod} bars");
 
-            // Trading Time Check (UTC+3)
             var serverTimeUtc = Server.Time;
             var exchangeTime = serverTimeUtc.AddHours(UtcOffsetHours);
-            if (exchangeTime.TimeOfDay < _tradeStartTime || exchangeTime.TimeOfDay >= _tradeEndTime) // Use >= for end time to exclude 15:00:00 itself
+            if (exchangeTime.TimeOfDay < _tradeStartTime || exchangeTime.TimeOfDay >= _tradeEndTime)
             {
                 Print($"Current exchange time {exchangeTime:HH:mm:ss} (UTC+{UtcOffsetHours}) is outside trading hours ({_tradeStartTime} - {_tradeEndTime}). No new positions.");
                 return;
             }
 
-            // One Trade Per Day Check
             if (serverTimeUtc.Date == _lastTradeDate.Date)
             {
                 Print($"One trade limit for {serverTimeUtc.Date:yyyy-MM-dd} already reached. No new positions.");
                 return;
             }
 
-            // Check if an open position by this cBot already exists
             bool hasOpenPosition = Positions.Any(p => p.Label == TradeLabel && p.SymbolName == Symbol.Name);
             if (hasOpenPosition)
             {
@@ -350,7 +236,6 @@ namespace cAlgo.Robots
                 return;
             }
 
-            // Trade Execution Logic
             if (currentContext == MarketContext.TrendingUp || currentContext == MarketContext.TrendingDown)
             {
                 if (StopLossInPips <= 0)
@@ -358,11 +243,16 @@ namespace cAlgo.Robots
                     Print("StopLossInPips must be greater than 0 to calculate volume based on risk. No trade.");
                     return;
                 }
-                 if (Symbol.PipValue <= 0)
+                 if (Symbol.PipValue <= 0) // PipValue needed for risk calc, PipSize for context calc
                 {
                     Print($"Symbol.PipValue ({Symbol.PipValue}) is zero or negative. Cannot calculate trade volume. No trade.");
                     return;
                 }
+                 if (Symbol.PipSize <= 0)
+                 {
+                    Print($"Symbol.PipSize ({Symbol.PipSize}) is zero or negative. Cannot calculate pips for context. No trade.");
+                    return;
+                 }
 
                 double riskAmountInAccountCurrency = Account.Balance * (RiskPercentage / 100.0);
                 double riskPerPipPerUnit = Symbol.PipValue;
@@ -370,56 +260,56 @@ namespace cAlgo.Robots
 
                 if (totalRiskValueForSlPerUnit <= 0)
                 {
-                    Print($"Total risk value for SL per unit ({totalRiskValueForSlPerUnit}) is zero or negative. StopLossInPips: {StopLossInPips}, PipValue: {Symbol.PipValue}. Cannot calculate volume. No trade.");
+                    Print($"Total risk value for SL per unit ({totalRiskValueForSlPerUnit}) is zero or negative. SLPips: {StopLossInPips}, PipValue: {Symbol.PipValue}. No trade.");
                     return;
                 }
 
                 double positionSizeInUnits_raw = riskAmountInAccountCurrency / totalRiskValueForSlPerUnit;
-                double calculatedVolumeInLots = Symbol.VolumeToLots(positionSizeInUnits_raw);
                 
-                // Normalize volume and check against min/max
-                calculatedVolumeInLots = Symbol.NormalizeVolumeInLots(calculatedVolumeInLots, RoundingMode.Down);
-
-                if (calculatedVolumeInLots < Symbol.VolumeInLotsMin)
+                if (Symbol.VolumeInUnitsStep <= 0)
                 {
-                    Print($"Calculated volume {calculatedVolumeInLots} lots is less than minimum {Symbol.VolumeInLotsMin} lots. Attempting to use minimum volume.");
-                    calculatedVolumeInLots = Symbol.VolumeInLotsMin;
-                    // Re-check if we can afford min volume with the risk settings
-                    double minVolumeInUnits = Symbol.LotsToVolumeInUnits(calculatedVolumeInLots);
-                    double costOfMinVolumeSl = minVolumeInUnits * totalRiskValueForSlPerUnit;
+                    Print("Symbol.VolumeInUnitsStep is zero or negative. Cannot normalize volume. No trade.");
+                    return;
+                }
+
+                double normalizedVolumeInUnits = Math.Floor(positionSizeInUnits_raw / Symbol.VolumeInUnitsStep) * Symbol.VolumeInUnitsStep;
+
+                if (normalizedVolumeInUnits < Symbol.VolumeInUnitsMin)
+                {
+                    Print($"Calc norm. volume {normalizedVolumeInUnits} units < min {Symbol.VolumeInUnitsMin} units. Using min volume.");
+                    normalizedVolumeInUnits = Symbol.VolumeInUnitsMin;
+                    
+                    double costOfMinVolumeSl = normalizedVolumeInUnits * totalRiskValueForSlPerUnit;
                     if (costOfMinVolumeSl > riskAmountInAccountCurrency && riskAmountInAccountCurrency > 0)
                     {
-                         Print($"Account cannot afford minimum volume {Symbol.VolumeInLotsMin} lots ({minVolumeInUnits} units) with current risk ({RiskPercentage}%) and SL ({StopLossInPips} pips). Risk Amount: {riskAmountInAccountCurrency}, Min Vol SL Cost: {costOfMinVolumeSl}. No trade.");
+                         Print($"Cannot afford min vol {Symbol.VolumeInUnitsMin} units with risk {RiskPercentage}% & SL {StopLossInPips} pips. Risk: {riskAmountInAccountCurrency}, Cost: {costOfMinVolumeSl}. No trade.");
                          return;
                     }
                 }
                 
-                if (calculatedVolumeInLots > Symbol.VolumeInLotsMax)
+                if (normalizedVolumeInUnits > Symbol.VolumeInUnitsMax)
                 {
-                    Print($"Calculated volume {calculatedVolumeInLots} lots is greater than maximum {Symbol.VolumeInLotsMax} lots. Adjusting to maximum.");
-                    calculatedVolumeInLots = Symbol.VolumeInLotsMax;
+                    Print($"Calc norm. volume {normalizedVolumeInUnits} units > max {Symbol.VolumeInUnitsMax} units. Using max volume.");
+                    normalizedVolumeInUnits = Symbol.VolumeInUnitsMax;
                 }
 
-                if (calculatedVolumeInLots == 0) // Double check after all adjustments
+                if (normalizedVolumeInUnits <= 0)
                 {
-                    Print($"Final calculated volume is zero lots. Cannot trade.");
+                    Print($"Final volume in units is zero or negative ({normalizedVolumeInUnits}). Cannot trade.");
                     return;
                 }
 
-                double finalVolumeInUnits = Symbol.LotsToVolumeInUnits(calculatedVolumeInLots);
-                if (finalVolumeInUnits == 0) {
-                    Print($"Final volume in units is zero. Cannot trade with {calculatedVolumeInLots} lots. Check symbol information (LotSize: {Symbol.LotSize}, etc.)");
-                    return;
-                }
+                double finalVolumeInUnits = normalizedVolumeInUnits;
+                double finalVolumeInLots = Symbol.VolumeInUnitsToQuantity(finalVolumeInUnits);
 
                 TradeType tradeType = (currentContext == MarketContext.TrendingUp) ? TradeType.Buy : TradeType.Sell;
-                Print($"Attempting to open {tradeType} position: Context={currentContext}, Volume={calculatedVolumeInLots} lots ({finalVolumeInUnits} units), SL={StopLossInPips} pips, TP={TakeProfitInPips} pips, Risk={RiskPercentage}% ({riskAmountInAccountCurrency} {Account.Currency})");
+                Print($"Attempting to open {tradeType} position: Context={currentContext}, Volume={finalVolumeInLots} lots ({finalVolumeInUnits} units), SL={StopLossInPips} pips, TP={TakeProfitInPips} pips, Risk={RiskPercentage}% ({riskAmountInAccountCurrency} {Account.Currency})");
                 
                 var result = ExecuteMarketOrder(tradeType, Symbol.Name, finalVolumeInUnits, TradeLabel, StopLossInPips, TakeProfitInPips);
 
                 if (result.IsSuccessful)
                 {
-                    _lastTradeDate = serverTimeUtc.Date; // Update last trade date only on successful execution
+                    _lastTradeDate = serverTimeUtc.Date; 
                     Print($"Trade executed successfully. Position ID: {result.Position.Id}, Price: {result.Position.EntryPrice}, Volume: {result.Position.VolumeInUnits} units");
                 }
                 else
@@ -436,7 +326,6 @@ namespace cAlgo.Robots
         protected override void OnTick()
         {
             // We are using OnBar for context analysis based on closed candles.
-            // OnTick can be used for faster reactions if needed, but for context, OnBar is usually preferred.
         }
 
         protected override void OnStop()
