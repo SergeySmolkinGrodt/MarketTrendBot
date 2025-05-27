@@ -113,8 +113,6 @@ namespace cAlgo.Robots
     [Robot(AccessRights = AccessRights.None, AddIndicators = true)] // AddIndicators might not be strictly needed now
     public class context : Robot
     {
-        [Parameter("Message", DefaultValue = "Hello world!")]
-        public string Message { get; set; }
 
         [Parameter("Context Lookback Period", DefaultValue = 10, MinValue = 1, Group = "Context Analysis")]
         public int ContextLookbackPeriod { get; set; }
@@ -134,15 +132,6 @@ namespace cAlgo.Robots
         [Parameter("Trade Label", DefaultValue = "MarketTrendBot_v2", Group = "Trading")]
         public string TradeLabel { get; set; }
 
-        [Parameter("Fractal Reaction %", DefaultValue = 0.20, MinValue = 0.01, Group = "Fractal Entry")]
-        public double FractalReactionPercentage { get; set; }
-
-        [Parameter("Fractal Window Size", DefaultValue = 1, MinValue = 1, MaxValue = 2, Step = 1, Group = "Fractal Entry")] // e.g., 1 means 1 bar on each side (3-bar fractal)
-        public int FractalWindowSize { get; set; }
-
-        [Parameter("Fractal Reaction Timeout (Mins)", DefaultValue = 5, MinValue = 1, MaxValue = 30, Group = "Fractal Entry")]
-        public int FractalReactionTimeoutMinutes { get; set; }
-
 
         private MarketContextAnalyzer _analyzer;
         private List<PriceBar> _historicalBars;
@@ -153,19 +142,10 @@ namespace cAlgo.Robots
         private readonly TimeSpan _tradeEndTime = new TimeSpan(15, 0, 0);   // 15:00
         private const int UtcOffsetHours = 3; // For UTC+3, assuming Server.Time is UTC
 
-        // State variables for fractal entry logic
-        private double? _activeH1FractalUpLevel;    // Stores the level of the last identified H1 Up-Fractal to be broken
-        private double? _activeH1FractalDownLevel;  // Stores the level of the last identified H1 Down-Fractal to be broken
-        private bool _waitingForUpReaction;         // Flag: true if H1 Up-Fractal was broken, waiting for price reaction upwards
-        private bool _waitingForDownReaction;       // Flag: true if H1 Down-Fractal was broken, waiting for price reaction downwards
-        private double _breakoutConfirmationPrice;  // Stores the close price of the bar that broke the fractal level
-        private double _targetReactionPrice;        // Stores the calculated target price for reaction confirmation
-        private DateTime _reactionWaitStartTime;    // Stores the timestamp when we started waiting for a reaction
-
 
         protected override void OnStart()
         {
-            Print(Message);
+        
             _analyzer = new MarketContextAnalyzer(ContextLookbackPeriod, ContextThresholdInPips);
             _historicalBars = new List<PriceBar>();
 
@@ -200,12 +180,6 @@ namespace cAlgo.Robots
             {
                 Print("Not enough historical data on start to determine context.");
             }
-            // Initialize fractal states
-            _activeH1FractalUpLevel = null;
-            _activeH1FractalDownLevel = null;
-            _waitingForUpReaction = false;
-            _waitingForDownReaction = false;
-            _reactionWaitStartTime = DateTime.MinValue; // Initialize
         }
 
         protected override void OnBar()
@@ -260,127 +234,23 @@ namespace cAlgo.Robots
                 return;
             }
 
-            bool fractalSignalAllowsTrade = false;
-            var h1Bars = MarketData.GetBars(TimeFrame.H1, Symbol.Name);
-
-            if (h1Bars.Count < (2 * FractalWindowSize + 1))
+            // Determine if a trade should be attempted based on market context
+            bool shouldAttemptTrade = false;
+            if (currentContext == MarketContext.TrendingUp || currentContext == MarketContext.TrendingDown)
             {
-                Print($"Not enough H1 bars ({h1Bars.Count}) to look for fractals with window size {FractalWindowSize}. Need at least {(2 * FractalWindowSize + 1)} H1 bars.");
+                shouldAttemptTrade = true;
             }
-            else
+            else if (currentContext == MarketContext.Ranging)
             {
-                if (currentContext == MarketContext.TrendingUp)
-                {
-                    if (_waitingForUpReaction) // Waiting for UP reaction AFTER a H1 Down Fractal was broken DOWN
-                    {
-                        if ((Server.Time - _reactionWaitStartTime).TotalMinutes > FractalReactionTimeoutMinutes)
-                        {
-                            Print($"TIMEOUT waiting for UP reaction after H1 Down Fractal break. Waited longer than {FractalReactionTimeoutMinutes} minutes. Resetting.");
-                            _waitingForUpReaction = false;
-                        }
-                        else if (Bars.Last(0).Close > _targetReactionPrice)
-                        {
-                            Print($"H1 Down Fractal (Contrarian) UP REACTION CONFIRMED. Current Close {Bars.Last(0).Close} > Target Price {_targetReactionPrice}. Trade signal for TrendingUp generated.");
-                            fractalSignalAllowsTrade = true;
-                            _waitingForUpReaction = false;
-                        }
-                        else if (Bars.Last(0).Low < _breakoutConfirmationPrice * (1 - (FractalReactionPercentage / 100.0))) // Price continued down significantly, negating up reaction
-                        {
-                            Print($"Price moved significantly DOWN after H1 Down Fractal break (Low: {Bars.Last(0).Low} vs BreakoutConfirmation: {_breakoutConfirmationPrice}), negating expected UP reaction. Resetting.");
-                            _waitingForUpReaction = false;
-                        }
-                    }
-                    else // Not waiting for reaction, so look for H1 Down fractal and its breakout downwards
-                    {
-                        if (!_activeH1FractalDownLevel.HasValue) // We look for a DOWN fractal in an UPTREND
-                        {
-                            _activeH1FractalDownLevel = FindLastH1FractalDown(h1Bars, FractalWindowSize);
-                            if (_activeH1FractalDownLevel.HasValue)
-                                Print($"TrendingUp Context: Identified new H1 Down-Fractal level to watch for break: {_activeH1FractalDownLevel.Value}");
-                        }
-
-                        if (_activeH1FractalDownLevel.HasValue && Bars.Last(0).Low < _activeH1FractalDownLevel.Value) // Breakout DOWN of the H1 Down Fractal
-                        {
-                            Print($"TrendingUp Context: H1 Down-Fractal at {_activeH1FractalDownLevel.Value} BROKEN DOWN by current bar Low {Bars.Last(0).Low}.");
-                            _breakoutConfirmationPrice = Bars.Last(0).Close; // Capture close price of the breakout bar
-                            _targetReactionPrice = _breakoutConfirmationPrice * (1 + FractalReactionPercentage / 100.0); // Expect UP reaction
-                            _waitingForUpReaction = true; // Now waiting for price to react UPWARDS
-                            _activeH1FractalDownLevel = null; 
-                            _reactionWaitStartTime = Server.Time; // Start timing the wait for reaction
-                            Print($"Breakout bar close: {_breakoutConfirmationPrice}. Waiting for UP reaction above {_targetReactionPrice} (TrendingUp continuation) for {FractalReactionTimeoutMinutes} mins.");
-                        }
-                    }
-                    if (_waitingForDownReaction) // If context switched while waiting for other direction
-                    {
-                        Print("Context changed to TrendingUp while waiting for general DOWN reaction. Resetting down-wait state.");
-                        _waitingForDownReaction = false;
-                    }
-                }
-                else if (currentContext == MarketContext.TrendingDown)
-                {
-                    if (_waitingForDownReaction) // Waiting for DOWN reaction AFTER a H1 Up Fractal was broken UP
-                    {
-                        if ((Server.Time - _reactionWaitStartTime).TotalMinutes > FractalReactionTimeoutMinutes)
-                        {
-                            Print($"TIMEOUT waiting for DOWN reaction after H1 Up Fractal break. Waited longer than {FractalReactionTimeoutMinutes} minutes. Resetting.");
-                            _waitingForDownReaction = false;
-                        }
-                        else if (Bars.Last(0).Close < _targetReactionPrice)
-                        {
-                            Print($"H1 Up Fractal (Contrarian) DOWN REACTION CONFIRMED. Current Close {Bars.Last(0).Close} < Target Price {_targetReactionPrice}. Trade signal for TrendingDown generated.");
-                            fractalSignalAllowsTrade = true;
-                            _waitingForDownReaction = false;
-                        }
-                        else if (Bars.Last(0).High > _breakoutConfirmationPrice * (1 + (FractalReactionPercentage / 100.0))) // Price continued up significantly, negating down reaction
-                        {
-                            Print($"Price moved significantly UP after H1 Up Fractal break (High: {Bars.Last(0).High} vs BreakoutConfirmation: {_breakoutConfirmationPrice}), negating expected DOWN reaction. Resetting.");
-                            _waitingForDownReaction = false;
-                        }
-                    }
-                    else // Not waiting for reaction, so look for H1 Up fractal and its breakout upwards
-                    {
-                        if (!_activeH1FractalUpLevel.HasValue) // We look for an UP fractal in a DOWNTREND
-                        {
-                            _activeH1FractalUpLevel = FindLastH1FractalUp(h1Bars, FractalWindowSize);
-                            if (_activeH1FractalUpLevel.HasValue)
-                                Print($"TrendingDown Context: Identified new H1 Up-Fractal level to watch for break: {_activeH1FractalUpLevel.Value}");
-                        }
-
-                        if (_activeH1FractalUpLevel.HasValue && Bars.Last(0).High > _activeH1FractalUpLevel.Value) // Breakout UP of the H1 Up Fractal
-                        {
-                            Print($"TrendingDown Context: H1 Up-Fractal at {_activeH1FractalUpLevel.Value} BROKEN UP by current bar High {Bars.Last(0).High}.");
-                            _breakoutConfirmationPrice = Bars.Last(0).Close;
-                            _targetReactionPrice = _breakoutConfirmationPrice * (1 - FractalReactionPercentage / 100.0); // Expect DOWN reaction
-                            _waitingForDownReaction = true; // Now waiting for price to react DOWNWARDS
-                            _activeH1FractalUpLevel = null; 
-                            _reactionWaitStartTime = Server.Time; // Start timing the wait for reaction
-                            Print($"Breakout bar close: {_breakoutConfirmationPrice}. Waiting for DOWN reaction below {_targetReactionPrice} (TrendingDown continuation) for {FractalReactionTimeoutMinutes} mins.");
-                        }
-                    }
-                     if (_waitingForUpReaction) // If context switched while waiting for other direction
-                    {
-                        Print("Context changed to TrendingDown while waiting for UP reaction. Resetting up-wait state.");
-                        _waitingForUpReaction = false;
-                    }
-                }
-                else // Market is Ranging or Undefined
-                {
-                    if (_waitingForUpReaction)
-                    {
-                        Print("Market context changed to Ranging/Undefined. Resetting wait for UP reaction.");
-                        _waitingForUpReaction = false;
-                    }
-                    if (_waitingForDownReaction)
-                    {
-                        Print("Market context changed to Ranging/Undefined. Resetting wait for DOWN reaction.");
-                        _waitingForDownReaction = false;
-                    }
-                    _activeH1FractalUpLevel = null; // Clear active fractal levels if not trending
-                    _activeH1FractalDownLevel = null;
-                }
+                 Print("Market is RANGING. No new positions will be opened.");
+            }
+             else // Undefined
+            {
+                 Print("Market context is UNDEFINED. No new positions will be opened.");
             }
 
-            if (fractalSignalAllowsTrade) // This flag is true only if context was TrendingUp/Down and reaction was confirmed
+
+            if (shouldAttemptTrade) // This flag is true if context was TrendingUp/Down
             {
                 if (StopLossInPips <= 0)
                 {
@@ -461,10 +331,6 @@ namespace cAlgo.Robots
                     Print($"Failed to execute trade: {result.Error}");
                 }
             }
-            else if (currentContext == MarketContext.Ranging)
-            {
-                Print("Market is RANGING. No new positions will be opened.");
-            }
         }
 
         protected override void OnTick()
@@ -475,63 +341,6 @@ namespace cAlgo.Robots
         protected override void OnStop()
         {
             Print("cBot stopped.");
-        }
-
-        // Helper function to find the last H1 Up-Fractal
-        // An Up-Fractal is a bar whose High is higher than the Highs of 'windowSize' bars to its left and 'windowSize' bars to its right.
-        private double? FindLastH1FractalUp(Bars h1Bars, int windowSize)
-        {
-            // Need at least (2 * windowSize + 1) bars to form a fractal.
-            // The last possible central bar of a fractal is at index h1Bars.Count - 1 - windowSize.
-            // The first possible central bar is at index windowSize.
-            if (h1Bars.Count < (2 * windowSize + 1)) return null;
-
-            for (int i = h1Bars.Count - 1 - windowSize; i >= windowSize; i--)
-            {
-                bool isFractal = true;
-                double centralHigh = h1Bars.HighPrices[i];
-                for (int j = 1; j <= windowSize; j++)
-                {
-                    if (h1Bars.HighPrices[i - j] >= centralHigh || h1Bars.HighPrices[i + j] >= centralHigh)
-                    {
-                        isFractal = false;
-                        break;
-                    }
-                }
-                if (isFractal)
-                {
-                    // Print($"H1 Up-Fractal found: Time={h1Bars.OpenTimes[i]}, High={centralHigh}");
-                    return centralHigh;
-                }
-            }
-            return null;
-        }
-
-        // Helper function to find the last H1 Down-Fractal
-        // A Down-Fractal is a bar whose Low is lower than the Lows of 'windowSize' bars to its left and 'windowSize' bars to its right.
-        private double? FindLastH1FractalDown(Bars h1Bars, int windowSize)
-        {
-            if (h1Bars.Count < (2 * windowSize + 1)) return null;
-
-            for (int i = h1Bars.Count - 1 - windowSize; i >= windowSize; i--)
-            {
-                bool isFractal = true;
-                double centralLow = h1Bars.LowPrices[i];
-                for (int j = 1; j <= windowSize; j++)
-                {
-                    if (h1Bars.LowPrices[i - j] <= centralLow || h1Bars.LowPrices[i + j] <= centralLow)
-                    {
-                        isFractal = false;
-                        break;
-                    }
-                }
-                if (isFractal)
-                {
-                    // Print($"H1 Down-Fractal found: Time={h1Bars.OpenTimes[i]}, Low={centralLow}");
-                    return centralLow;
-                }
-            }
-            return null;
         }
     }
 }
