@@ -124,13 +124,13 @@ namespace cAlgo.Robots
         [Parameter("RSI Buy Threshold", DefaultValue = 55, MinValue = 30, MaxValue = 70, Group = "Context Analysis")]
         public double RsiBuyThreshold { get; set; }
 
+        [Parameter("RSI Sell Threshold", DefaultValue = 45, MinValue = 30, MaxValue = 50, Group = "Context Analysis")]
+        public double RsiSellThreshold { get; set; }
+
         [Parameter("RSI Period", DefaultValue = 14, MinValue = 2, Group = "Context Analysis")]
         public int RsiPeriod { get; set; }
 
-        [Parameter("RSI Sell Threshold", DefaultValue = 45, MinValue = 30, MaxValue = 70, Group = "Context Analysis")]
-        public double RsiSellThreshold { get; set; }
-
-        [Parameter("Max Historical Bars", DefaultValue = 200, MinValue = 50, MaxValue = 1000, Group = "Context Analysis")]
+        [Parameter("Max Historical Bars", DefaultValue = 500, MinValue = 50, MaxValue = 1000, Group = "Context Analysis")]
         public int MaxHistoricalBars { get; set; }
 
         [Parameter("Risk % Per Trade", DefaultValue = 1.0, MinValue = 0.1, MaxValue = 1.0, Step = 0.1, Group = "Management")]
@@ -142,11 +142,11 @@ namespace cAlgo.Robots
         [Parameter("Take Profit (Pips)", DefaultValue = 40, MinValue = 1, Group = "Management")]
         public int TakeProfitInPips { get; set; }
 
-        [Parameter("Trade Label", DefaultValue = "MarketTrendBot_v2", Group = "Management")]
-        public string TradeLabel { get; set; }
-
         [Parameter("Trailing Stop (Pips)", DefaultValue = 0, MinValue = 0, Group = "Management")] // 0 to disable
         public int TrailingStopPips { get; set; }
+
+        [Parameter("Trade Label", DefaultValue = "MarketTrendBot_v2", Group = "Management")]
+        public string TradeLabel { get; set; }
 
         
         private MarketContextAnalyzer _analyzer;
