@@ -5,6 +5,7 @@ using cAlgo.API;
 using cAlgo.API.Collections;
 // using cAlgo.API.Indicators; // No longer needed directly here if IndicatorsHelper is removed
 using cAlgo.API.Internals;
+using cAlgo.API.Indicators;
 
 namespace cAlgo.Robots
 {
@@ -132,15 +133,26 @@ namespace cAlgo.Robots
         [Parameter("Trade Label", DefaultValue = "MarketTrendBot_v2", Group = "Trading")]
         public string TradeLabel { get; set; }
 
+        [Parameter("RSI Period", DefaultValue = 14, MinValue = 2, Group = "RSI Filter")]
+        public int RsiPeriod { get; set; }
+
+        [Parameter("RSI Buy Threshold", DefaultValue = 55, MinValue = 50, MaxValue = 70, Group = "RSI Filter")]
+        public double RsiBuyThreshold { get; set; }
+
+        [Parameter("RSI Sell Threshold", DefaultValue = 45, MinValue = 30, MaxValue = 50, Group = "RSI Filter")]
+        public double RsiSellThreshold { get; set; }
+
 
         private MarketContextAnalyzer _analyzer;
         private List<PriceBar> _historicalBars;
-        private const int _maxBars = 200; // Store a maximum of 200 bars for analysis, can be adjusted
+        private const int _maxBars = 500; // Store a maximum of 200 bars for analysis, can be adjusted
 
         private DateTime _lastTradeDate = DateTime.MinValue;
         private readonly TimeSpan _tradeStartTime = new TimeSpan(9, 0, 0); // 09:00
         private readonly TimeSpan _tradeEndTime = new TimeSpan(15, 0, 0);   // 15:00
         private const int UtcOffsetHours = 3; // For UTC+3, assuming Server.Time is UTC
+
+        private RelativeStrengthIndex _rsi;
 
 
         protected override void OnStart()
@@ -148,6 +160,7 @@ namespace cAlgo.Robots
         
             _analyzer = new MarketContextAnalyzer(ContextLookbackPeriod, ContextThresholdInPips);
             _historicalBars = new List<PriceBar>();
+            _rsi = Indicators.RelativeStrengthIndex(MarketData.GetBars(TimeFrame).ClosePrices, RsiPeriod);
 
             var history = MarketData.GetBars(TimeFrame, Symbol.Name);
             foreach (var bar in history)
@@ -238,7 +251,32 @@ namespace cAlgo.Robots
             bool shouldAttemptTrade = false;
             if (currentContext == MarketContext.TrendingUp || currentContext == MarketContext.TrendingDown)
             {
-                shouldAttemptTrade = true;
+                // RSI Filter Logic
+                double currentRsi = _rsi.Result.LastValue;
+                if (currentContext == MarketContext.TrendingUp)
+                {
+                    if (currentRsi > RsiBuyThreshold)
+                    {
+                        shouldAttemptTrade = true;
+                        Print($"RSI ({currentRsi:F2}) > Buy Threshold ({RsiBuyThreshold}). Allowing BUY.");
+                    }
+                    else
+                    {
+                        Print($"RSI ({currentRsi:F2}) <= Buy Threshold ({RsiBuyThreshold}). Filtering BUY signal.");
+                    }
+                }
+                else // TrendingDown
+                {
+                    if (currentRsi < RsiSellThreshold)
+                    {
+                        shouldAttemptTrade = true;
+                        Print($"RSI ({currentRsi:F2}) < Sell Threshold ({RsiSellThreshold}). Allowing SELL.");
+                    }
+                    else
+                    {
+                        Print($"RSI ({currentRsi:F2}) >= Sell Threshold ({RsiSellThreshold}). Filtering SELL signal.");
+                    }
+                }
             }
             else if (currentContext == MarketContext.Ranging)
             {
