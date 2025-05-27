@@ -121,40 +121,40 @@ namespace cAlgo.Robots
         [Parameter("Context Threshold (Pips)", DefaultValue = 20, MinValue = 1, Group = "Context Analysis")]
         public double ContextThresholdInPips { get; set; }
 
-        [Parameter("Risk % Per Trade", DefaultValue = 1.0, MinValue = 0.1, MaxValue = 1.0, Step = 0.1, Group = "Trading")]
-        public double RiskPercentage { get; set; }
-
-        [Parameter("Stop Loss (Pips)", DefaultValue = 20, MinValue = 1, Group = "Trading")]
-        public int StopLossInPips { get; set; }
-
-        [Parameter("Take Profit (Pips)", DefaultValue = 40, MinValue = 1, Group = "Trading")]
-        public int TakeProfitInPips { get; set; }
-
-        [Parameter("Trade Label", DefaultValue = "MarketTrendBot_v2", Group = "Trading")]
-        public string TradeLabel { get; set; }
-
-        [Parameter("RSI Period", DefaultValue = 14, MinValue = 2, Group = "RSI Filter")]
-        public int RsiPeriod { get; set; }
-
-        [Parameter("RSI Buy Threshold", DefaultValue = 55, MinValue = 30, MaxValue = 70, Group = "RSI Filter")]
+        [Parameter("RSI Buy Threshold", DefaultValue = 55, MinValue = 30, MaxValue = 70, Group = "Context Analysis")]
         public double RsiBuyThreshold { get; set; }
 
-        [Parameter("RSI Sell Threshold", DefaultValue = 45, MinValue = 30, MaxValue = 70, Group = "RSI Filter")]
+        [Parameter("RSI Period", DefaultValue = 14, MinValue = 2, Group = "Context Analysis")]
+        public int RsiPeriod { get; set; }
+
+        [Parameter("RSI Sell Threshold", DefaultValue = 45, MinValue = 30, MaxValue = 70, Group = "Context Analysis")]
         public double RsiSellThreshold { get; set; }
 
-        [Parameter("Trailing Stop (Pips)", DefaultValue = 0, MinValue = 0, Group = "Trading")] // 0 to disable
+        [Parameter("Max Historical Bars", DefaultValue = 200, MinValue = 50, MaxValue = 1000, Group = "Context Analysis")]
+        public int MaxHistoricalBars { get; set; }
+
+        [Parameter("Risk % Per Trade", DefaultValue = 1.0, MinValue = 0.1, MaxValue = 1.0, Step = 0.1, Group = "Management")]
+        public double RiskPercentage { get; set; }
+
+        [Parameter("Stop Loss (Pips)", DefaultValue = 20, MinValue = 1, Group = "Management")]
+        public int StopLossInPips { get; set; }
+
+        [Parameter("Take Profit (Pips)", DefaultValue = 40, MinValue = 1, Group = "Management")]
+        public int TakeProfitInPips { get; set; }
+
+        [Parameter("Trade Label", DefaultValue = "MarketTrendBot_v2", Group = "Management")]
+        public string TradeLabel { get; set; }
+
+        [Parameter("Trailing Stop (Pips)", DefaultValue = 0, MinValue = 0, Group = "Management")] // 0 to disable
         public int TrailingStopPips { get; set; }
 
-
+        
         private MarketContextAnalyzer _analyzer;
         private List<PriceBar> _historicalBars;
-        private const int _maxBars = 200; // Store a maximum of 200 bars for analysis, can be adjusted
-
         private DateTime _lastTradeDate = DateTime.MinValue;
         private readonly TimeSpan _tradeStartTime = new TimeSpan(9, 0, 0); // 09:00
         private readonly TimeSpan _tradeEndTime = new TimeSpan(15, 0, 0);   // 15:00
         private const int UtcOffsetHours = 3; // For UTC+3, assuming Server.Time is UTC
-
         private RelativeStrengthIndex _rsi;
 
 
@@ -178,13 +178,13 @@ namespace cAlgo.Robots
                     Volume = bar.TickVolume
                 };
                 _historicalBars.Add(priceBar);
-                if (_historicalBars.Count > _maxBars) // Ensure _maxBars is sufficient for longest lookback
+                if (_historicalBars.Count > MaxHistoricalBars) // Ensure _maxBars is sufficient for longest lookback
                 {
                     _historicalBars.RemoveAt(0);
                 }
             }
             Print($"Loaded {history.Count} historical bars. Using last {_historicalBars.Count} for analysis.");
-            Print($"Ensure _maxBars ({_maxBars}) is greater than ContextLookbackPeriod ({ContextLookbackPeriod}).");
+            Print($"Ensure MaxHistoricalBars ({MaxHistoricalBars}) is greater than ContextLookbackPeriod ({ContextLookbackPeriod}).");
 
 
             if (_historicalBars.Count > ContextLookbackPeriod) // Need LookbackPeriod + 1 bars for first calculation
@@ -214,7 +214,7 @@ namespace cAlgo.Robots
             if (_historicalBars.Count == 0 || _historicalBars.Last().Timestamp != priceBar.Timestamp)
             {
                 _historicalBars.Add(priceBar);
-                if (_historicalBars.Count > _maxBars)
+                if (_historicalBars.Count > MaxHistoricalBars)
                 {
                     _historicalBars.RemoveAt(0);
                 }
