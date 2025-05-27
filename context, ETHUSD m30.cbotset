@@ -1,0 +1,14 @@
+﻿{
+  "Chart": {
+    "Symbol": "ETHUSD",
+    "Period": "m30"
+  },
+  "Parameters": {
+    "ContextLookbackPeriod": 5,
+    "ContextThresholdInPips": 5.800000000000001,
+    "RiskPercentage": 1.0,
+    "StopLossInPips": 14,
+    "TakeProfitInPips": 38,
+    "TradeLabel": "MarketTrendBot_v1"
+  }
+}
