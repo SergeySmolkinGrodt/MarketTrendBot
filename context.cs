@@ -136,10 +136,10 @@ namespace cAlgo.Robots
         [Parameter("RSI Period", DefaultValue = 14, MinValue = 2, Group = "RSI Filter")]
         public int RsiPeriod { get; set; }
 
-        [Parameter("RSI Buy Threshold", DefaultValue = 55, MinValue = 50, MaxValue = 70, Group = "RSI Filter")]
+        [Parameter("RSI Buy Threshold", DefaultValue = 55, MinValue = 30, MaxValue = 70, Group = "RSI Filter")]
         public double RsiBuyThreshold { get; set; }
 
-        [Parameter("RSI Sell Threshold", DefaultValue = 45, MinValue = 30, MaxValue = 50, Group = "RSI Filter")]
+        [Parameter("RSI Sell Threshold", DefaultValue = 45, MinValue = 30, MaxValue = 70, Group = "RSI Filter")]
         public double RsiSellThreshold { get; set; }
 
         [Parameter("Trailing Stop (Pips)", DefaultValue = 0, MinValue = 0, Group = "Trading")] // 0 to disable
@@ -148,7 +148,7 @@ namespace cAlgo.Robots
 
         private MarketContextAnalyzer _analyzer;
         private List<PriceBar> _historicalBars;
-        private const int _maxBars = 500; // Store a maximum of 200 bars for analysis, can be adjusted
+        private const int _maxBars = 200; // Store a maximum of 200 bars for analysis, can be adjusted
 
         private DateTime _lastTradeDate = DateTime.MinValue;
         private readonly TimeSpan _tradeStartTime = new TimeSpan(9, 0, 0); // 09:00
