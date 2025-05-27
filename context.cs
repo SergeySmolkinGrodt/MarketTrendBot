@@ -142,6 +142,9 @@ namespace cAlgo.Robots
         [Parameter("RSI Sell Threshold", DefaultValue = 45, MinValue = 30, MaxValue = 50, Group = "RSI Filter")]
         public double RsiSellThreshold { get; set; }
 
+        [Parameter("Trailing Stop (Pips)", DefaultValue = 0, MinValue = 0, Group = "Trading")] // 0 to disable
+        public int TrailingStopPips { get; set; }
+
 
         private MarketContextAnalyzer _analyzer;
         private List<PriceBar> _historicalBars;
@@ -369,16 +372,75 @@ namespace cAlgo.Robots
                     Print($"Failed to execute trade: {result.Error}");
                 }
             }
+
+            ManageTrailingStops(); // Call method to manage trailing stops
         }
 
         protected override void OnTick()
         {
             // We are using OnBar for context analysis based on closed candles.
+            // If more responsive trailing stop is needed, part of ManageTrailingStops logic could be moved here,
+            // but be mindful of an increased number of modification requests.
+            // ManageTrailingStops(); // Potentially call here if needed, with careful consideration
         }
 
         protected override void OnStop()
         {
             Print("cBot stopped.");
+        }
+
+        private void ManageTrailingStops()
+        {
+            if (TrailingStopPips <= 0) return; // Trailing stop is disabled
+
+            foreach (var position in Positions)
+            {
+                if (position.SymbolName == Symbol.Name && position.Label == TradeLabel)
+                {
+                    if (position.TradeType == TradeType.Buy)
+                    {
+                        double newStopLossPrice = Math.Round(Symbol.Bid - TrailingStopPips * Symbol.PipSize, Symbol.Digits);
+                        // Ensure new SL is higher than entry price to start trailing
+                        // And also ensure new SL is higher than current SL (if any)
+                        if (newStopLossPrice > position.EntryPrice && 
+                            (!position.StopLoss.HasValue || newStopLossPrice > position.StopLoss.Value))
+                        {
+                            var tempranaStopLoss = StopLoss.CreateTrailingStop(TrailingStopPips);
+                            var protection = Protection.Create(tempranaStopLoss, position.TakeProfit, ProtectionType.StopLoss);
+                            var modifyResult = ModifyPosition(position, protection);
+                            if (modifyResult.IsSuccessful)
+                            {
+                                Print($"Trailing Stop for BUY Position #{position.Id} moved to {newStopLossPrice}");
+                            }
+                            else
+                            {
+                                Print($"Error modifying BUY Position #{position.Id} for trailing stop: {modifyResult.Error}");
+                            }
+                        }
+                    }
+                    else if (position.TradeType == TradeType.Sell)
+                    {
+                        double newStopLossPrice = Math.Round(Symbol.Ask + TrailingStopPips * Symbol.PipSize, Symbol.Digits);
+                        // Ensure new SL is lower than entry price to start trailing
+                        // And also ensure new SL is lower than current SL (if any)
+                        if (newStopLossPrice < position.EntryPrice && 
+                            (!position.StopLoss.HasValue || newStopLossPrice < position.StopLoss.Value))
+                        {
+                            var tempranaStopLoss = StopLoss.CreateTrailingStop(TrailingStopPips);
+                            var protection = Protection.Create(tempranaStopLoss, position.TakeProfit, ProtectionType.StopLoss);
+                            var modifyResult = ModifyPosition(position, protection);
+                            if (modifyResult.IsSuccessful)
+                            {
+                                Print($"Trailing Stop for SELL Position #{position.Id} moved to {newStopLossPrice}");
+                            }
+                            else
+                            {
+                                Print($"Error modifying SELL Position #{position.Id} for trailing stop: {modifyResult.Error}");
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
