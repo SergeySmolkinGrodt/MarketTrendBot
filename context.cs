@@ -405,9 +405,7 @@ namespace cAlgo.Robots
                         if (newStopLossPrice > position.EntryPrice && 
                             (!position.StopLoss.HasValue || newStopLossPrice > position.StopLoss.Value))
                         {
-                            var tempranaStopLoss = StopLoss.CreateTrailingStop(TrailingStopPips);
-                            var protection = Protection.Create(tempranaStopLoss, position.TakeProfit, ProtectionType.StopLoss);
-                            var modifyResult = ModifyPosition(position, protection);
+                            var modifyResult = ModifyPosition(position, newStopLossPrice, position.TakeProfit);
                             if (modifyResult.IsSuccessful)
                             {
                                 Print($"Trailing Stop for BUY Position #{position.Id} moved to {newStopLossPrice}");
@@ -426,9 +424,7 @@ namespace cAlgo.Robots
                         if (newStopLossPrice < position.EntryPrice && 
                             (!position.StopLoss.HasValue || newStopLossPrice < position.StopLoss.Value))
                         {
-                            var tempranaStopLoss = StopLoss.CreateTrailingStop(TrailingStopPips);
-                            var protection = Protection.Create(tempranaStopLoss, position.TakeProfit, ProtectionType.StopLoss);
-                            var modifyResult = ModifyPosition(position, protection);
+                            var modifyResult = ModifyPosition(position, newStopLossPrice, position.TakeProfit);
                             if (modifyResult.IsSuccessful)
                             {
                                 Print($"Trailing Stop for SELL Position #{position.Id} moved to {newStopLossPrice}");

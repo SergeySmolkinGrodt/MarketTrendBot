@@ -4,5 +4,4 @@ Local Context Trading
 
 Context Defiition
 
-трейлинг тейк
 колво сделок
