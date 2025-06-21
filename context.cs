@@ -153,14 +153,14 @@ namespace cAlgo.Robots
         private const int UtcOffsetHours = 3; // For UTC+3, assuming Server.Time is UTC
         private MacdHistogram _macd;
         private ExponentialMovingAverage _emaTrend;
-        private AverageDirectionalMovementIndex _adx;
+        private AverageDirectionalMovementIndexRating _adx;
 
 
         protected override void OnStart()
         {
             _macd = Indicators.MacdHistogram(MacdFastEmaPeriod, MacdSlowEmaPeriod, MacdSignalPeriod);
             _emaTrend = Indicators.ExponentialMovingAverage(MarketData.GetBars(TimeFrame).ClosePrices, EmaPeriod);
-            _adx = Indicators.AverageDirectionalMovementIndex(AdxPeriod);
+            _adx = Indicators.AverageDirectionalMovementIndexRating(AdxPeriod);
             Print("MACD Bot with EMA and ADX filters Started.");
         }
 
@@ -380,4 +380,5 @@ namespace cAlgo.Robots
         }
     }
 }
+
 
